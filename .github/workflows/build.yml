@@ -26,3 +26,14 @@ jobs:
 
       - name: Build project
         run: npm run build
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: client-build
+          path: client/dist/
+          if-no-files-found: error
+          retention-days: 1
+
+
+      
+        
