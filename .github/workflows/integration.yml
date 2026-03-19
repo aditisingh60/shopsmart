@@ -1,38 +1,51 @@
-name: Integration
+name: CI Pipeline
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
-  workflow_dispatch:
 
 jobs:
-  test-and-build:
+  backend:
     runs-on: ubuntu-latest
-
-    strategy:
-      matrix:
-        node-version: [18.x, 20.x, 22.x]
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v3
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
-          cache: npm
-
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: server/package-lock.json
       - name: Install dependencies
-        run: npm i
-
-      - name: Run linter
+        run: npm install
+        working-directory: server
+      - name: Lint
         run: npm run lint
-
-      - name: Run tests
+        working-directory: server
+      - name: Test
         run: npm run test
+        working-directory: server
 
-      - name: Build project (optional)
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: client/package-lock.json
+      - name: Install dependencies
+        run: npm install
+        working-directory: client
+      - name: Lint
+        run: npm run lint
+        working-directory: client
+      - name: Test
+        run: npm run test
+        working-directory: client
+      - name: Build
         run: npm run build
+        working-directory: client

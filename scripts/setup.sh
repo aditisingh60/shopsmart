@@ -1,43 +1,36 @@
 #!/usr/bin/env bash
 
+# Exit on error
+set -e
+
 echo "Starting project setup..."
 
+# Idempotent directory creation
+mkdir -p server/node_modules
+mkdir -p client/node_modules
 
-if [ -d "server/node_modules" ]; then
-  echo "Backend dependencies already installed."
-else
-  echo "Installing backend dependencies..."
-  npm install --prefix server
-  if [ $? -ne 0 ]; then
-    echo "Backend npm install failed."
-    exit 1
-  fi
-fi
+# Backend setup
+echo "Installing backend dependencies..."
+npm install --prefix server
 
+# Frontend setup
+echo "Installing frontend dependencies..."
+npm install --prefix client
 
-if [ -d "client/node_modules" ]; then
-  echo "Frontend dependencies already installed."
-else
-  echo "Installing frontend dependencies..."
-  npm install --prefix client
-  if [ $? -ne 0 ]; then
-    echo "Frontend npm install failed."
-    exit 1
-  fi
-fi
-
-
-if [ -f ".env" ]; then
-  echo ".env file already exists."
-else
-  echo "Creating .env file..."
+# Environment setup
+if [ ! -f ".env" ]; then
+  echo "Creating root .env file..."
   echo "NODE_ENV=development" > .env
   echo "PORT=3001" >> .env
+else
+  echo "Root .env file already exists."
+fi
 
-  if [ $? -ne 0 ]; then
-    echo ".env file creation failed."
-    exit 2
-  fi
+if [ ! -f "client/.env" ]; then
+  echo "Creating client .env file..."
+  echo "VITE_API_URL=http://localhost:3001" > client/.env
+else
+  echo "Client .env file already exists."
 fi
 
 echo "Setup completed successfully."
