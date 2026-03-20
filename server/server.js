@@ -1,7 +1,9 @@
+require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
 const app = express();
+const PORT = process.env.PORT || 5001;
 
 // Middleware
 app.use(cors());
@@ -16,9 +18,11 @@ app.get('/api/health', (req, res) => {
   });
 });
 
-// Root Route (optional, just to show something)
+// Root Route
 app.get('/', (req, res) => {
   res.send('ShopSmart Backend Service');
 });
 
-module.exports = app;
+app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+});
