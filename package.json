@@ -1,0 +1,22 @@
+{
+  "name": "shopsmart-root",
+  "version": "1.0.0",
+  "private": true,
+  "workspaces": [
+    "client",
+    "server"
+  ],
+  "scripts": {
+    "setup": "bash scripts/setup.sh",
+    "lint": "npm run lint --prefix server && npm run lint --prefix client",
+    "test": "npm run test --prefix server && npm run test --prefix client",
+    "test:e2e": "playwright test",
+    "build": "npm run build --prefix client",
+    "start": "npm run start --prefix server",
+    "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2",
+    "@playwright/test": "^1.42.1"
+  }
+}
