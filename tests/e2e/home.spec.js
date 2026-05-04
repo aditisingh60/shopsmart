@@ -11,5 +11,6 @@ test('get started link', async ({ page }) => {
   await page.goto('http://localhost:5173');
 
   // Click the get started link.
-  await expect(page.getByRole('heading', { name: 'Home Page' })).toBeVisible();
+  // Check for the hero banner heading.
+  await expect(page.getByRole('heading', { name: /Beauty Unleashed/i })).toBeVisible();
 });

@@ -16,7 +16,14 @@
     "dev": "concurrently \"npm run dev --prefix server\" \"npm run dev --prefix client\""
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
+    "@playwright/test": "^1.42.1",
     "concurrently": "^8.2.2",
-    "@playwright/test": "^1.42.1"
+    "eslint": "^9.39.4",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^5.2.0"
+  },
+  "dependencies": {
+    "mongoose": "^9.6.1"
   }
 }
