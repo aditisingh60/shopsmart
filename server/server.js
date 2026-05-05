@@ -23,6 +23,9 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString()
   });
 });
+app.get('/health', (req, res) => {
+  res.status(200).send('OK');
+});
 
 // Root Route
 app.get('/', (req, res) => {
