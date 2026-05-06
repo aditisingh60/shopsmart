@@ -20,6 +20,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            server/package-lock.json
+            client/package-lock.json
+            tests/e2e/package-lock.json
+
+      - name: Create reports directory
+        run: mkdir -p test-reports
 
       - name: Install dependencies (server)
         run: npm ci
@@ -48,6 +56,9 @@ jobs:
       - name: Build (client)
         run: npm run build
         working-directory: client
+
+      - name: Docker build (client)
+        run: docker build -t shopsmart-client-ci -f client/Dockerfile client
 
       - name: Install dependencies (e2e)
         run: npm ci
