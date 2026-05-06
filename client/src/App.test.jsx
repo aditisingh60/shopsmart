@@ -4,15 +4,8 @@ import { describe, it, expect, vi } from 'vitest';
 
 describe('App', () => {
     it('renders ShopSmart title', () => {
-        // Mock fetch
-        global.fetch = vi.fn(() =>
-            Promise.resolve({
-                json: () => Promise.resolve({ status: 'ok', message: 'Test Msg', timestamp: 'now' })
-            })
-        );
-
         render(<App />);
-        const linkElement = screen.getByText(/ShopSmart/i);
-        expect(linkElement).toBeInTheDocument();
+        const brandLink = screen.getByRole('link', { name: /shop\s*smart/i });
+        expect(brandLink).toBeInTheDocument();
     });
 });
