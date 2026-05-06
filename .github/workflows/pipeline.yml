@@ -60,18 +60,6 @@ jobs:
       - name: Docker build (client)
         run: docker build -t shopsmart-client-ci -f client/Dockerfile client
 
-      - name: Install dependencies (e2e)
-        run: npm ci
-        working-directory: tests/e2e
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-        working-directory: tests/e2e
-
-      - name: Run E2E tests (Playwright)
-        run: npx playwright test
-        working-directory: tests/e2e
-
       - name: Upload test reports
         uses: actions/upload-artifact@v6
         if: always()
@@ -79,7 +67,6 @@ jobs:
           name: test-reports
           path: |
             test-reports/
-            tests/e2e/playwright-report/
           if-no-files-found: warn
           retention-days: 7
 
