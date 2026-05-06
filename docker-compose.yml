@@ -1,0 +1,38 @@
+services:
+  mongo:
+    image: mongo:7
+    container_name: shopsmart-mongo
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    container_name: shopsmart-server
+    environment:
+      - PORT=5001
+      - MONGO_URI=mongodb://mongo:27017/shopsmart
+    depends_on:
+      - mongo
+    ports:
+      - "5001:5001"
+
+  client:
+    image: node:20-alpine
+    container_name: shopsmart-client
+    working_dir: /app
+    volumes:
+      - ./client:/app
+    environment:
+      - VITE_API_URL=http://localhost:5001
+    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
+    ports:
+      - "5173:5173"
+    depends_on:
+      - server
+
+volumes:
+  mongo_data:

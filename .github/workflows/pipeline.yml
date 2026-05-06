@@ -1,0 +1,181 @@
+name: Rubric Pipeline (Tests → Terraform → ECS)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  TF_IN_AUTOMATION: "true"
+
+jobs:
+  tests:
+    name: Phase 1 — Testing
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies (server)
+        run: npm ci
+        working-directory: server
+
+      - name: Lint (server)
+        run: npm run lint
+        working-directory: server
+
+      - name: Test (server) + JSON report
+        run: npm run test -- --json --outputFile=../test-reports/jest-server.json
+        working-directory: server
+
+      - name: Install dependencies (client)
+        run: npm ci
+        working-directory: client
+
+      - name: Lint (client)
+        run: npm run lint
+        working-directory: client
+
+      - name: Test (client) + JSON report
+        run: npm run test -- --reporter=json --outputFile=../test-reports/vitest-client.json
+        working-directory: client
+
+      - name: Build (client)
+        run: npm run build
+        working-directory: client
+
+      - name: Install dependencies (e2e)
+        run: npm ci
+        working-directory: tests/e2e
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+        working-directory: tests/e2e
+
+      - name: Run E2E tests (Playwright)
+        run: npx playwright test
+        working-directory: tests/e2e
+
+      - name: Upload test reports
+        uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: test-reports
+          path: |
+            test-reports/
+            tests/e2e/playwright-report/
+          if-no-files-found: warn
+          retention-days: 7
+
+  terraform:
+    name: Phase 2 — Terraform Provisioning
+    runs-on: ubuntu-latest
+    needs: [tests]
+    outputs:
+      ecr_repo: ${{ steps.out.outputs.ecr_repo }}
+      cluster: ${{ steps.out.outputs.cluster }}
+      service: ${{ steps.out.outputs.service }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+
+      - name: Terraform fmt (check)
+        run: terraform fmt -check
+        working-directory: terraform
+
+      - name: Terraform init
+        run: terraform init
+        working-directory: terraform
+
+      - name: Terraform validate
+        run: terraform validate
+        working-directory: terraform
+
+      - name: Terraform plan
+        run: terraform plan -out=tfplan
+        working-directory: terraform
+
+      - name: Terraform apply
+        if: github.ref == 'refs/heads/main'
+        run: terraform apply -auto-approve tfplan
+        working-directory: terraform
+
+      - name: Read Terraform outputs
+        id: out
+        if: github.ref == 'refs/heads/main'
+        run: |
+          echo "ecr_repo=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+          echo "cluster=$(terraform output -raw ecs_cluster_name)" >> "$GITHUB_OUTPUT"
+          echo "service=$(terraform output -raw ecs_service_name)" >> "$GITHUB_OUTPUT"
+        working-directory: terraform
+
+  build_push:
+    name: Phase 3 — Docker Build & Push (ECR)
+    runs-on: ubuntu-latest
+    needs: [terraform]
+    if: github.ref == 'refs/heads/main'
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push (server)
+        id: meta
+        env:
+          ECR_REPO: ${{ needs.terraform.outputs.ecr_repo }}
+          TAG: latest
+        run: |
+          IMAGE="$ECR_REPO:$TAG"
+          docker build -t "$IMAGE" -f server/Dockerfile server
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+  deploy_ecs:
+    name: Deploy to ECS Fargate
+    runs-on: ubuntu-latest
+    needs: [terraform, build_push]
+    if: github.ref == 'refs/heads/main'
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Force new deployment
+        env:
+          CLUSTER: ${{ needs.terraform.outputs.cluster }}
+          SERVICE: ${{ needs.terraform.outputs.service }}
+        run: |
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$SERVICE" \
+            --force-new-deployment
