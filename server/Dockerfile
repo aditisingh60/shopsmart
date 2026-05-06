@@ -12,6 +12,9 @@ WORKDIR /app
 # Create non-root user
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
+# Healthcheck tool
+RUN apk add --no-cache curl
+
 # Copy only needed files
 COPY --from=builder /app .
 
@@ -24,6 +27,6 @@ EXPOSE 5001
 
 # Healthcheck
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:5001/health || exit 1
+    CMD curl -fsS http://localhost:5001/health >/dev/null || exit 1
 
 CMD ["node", "server.js"]

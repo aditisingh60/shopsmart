@@ -198,7 +198,7 @@ resource "aws_ecs_task_definition" "api" {
         }
       }
       healthCheck = {
-        command     = ["CMD-SHELL", "wget -qO- http://localhost:5001/health >/dev/null 2>&1 || exit 1"]
+        command     = ["CMD-SHELL", "curl -fsS http://localhost:5001/health >/dev/null || exit 1"]
         interval    = 30
         timeout     = 5
         retries     = 3
@@ -213,12 +213,15 @@ resource "aws_ecs_service" "api" {
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.api.arn
   launch_type     = "FARGATE"
-  desired_count   = 1
+  # Create service first; start tasks after image is pushed (pipeline deploy step)
+  desired_count = 0
 
   network_configuration {
-    subnets          = data.aws_subnets.default.ids
-    security_groups  = [aws_security_group.ecs_service.id]
-    assign_public_ip = false
+    subnets         = data.aws_subnets.default.ids
+    security_groups = [aws_security_group.ecs_service.id]
+    # Default VPC subnets are typically public; without NAT, tasks need a public IP
+    # to pull images from ECR and publish logs.
+    assign_public_ip = true
   }
 
   load_balancer {
@@ -226,6 +229,8 @@ resource "aws_ecs_service" "api" {
     container_name   = "api"
     container_port   = 5001
   }
+
+  depends_on = [aws_lb_listener.http]
 }
 
 output "s3_bucket_name" {
