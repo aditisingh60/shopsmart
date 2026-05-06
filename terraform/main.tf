@@ -4,9 +4,12 @@ locals {
   # Using a timestamp suffix keeps names unique for each apply execution.
   suffix         = formatdate("YYYYMMDDhhmmss", timestamp())
   api_name       = "${local.project}-api-${local.suffix}"
+  web_name       = "${local.project}-web-${local.suffix}"
   cluster_name   = "${local.project}-cluster-${local.suffix}"
   ecs_sg_name    = "${local.project}-ecs-sg-${local.suffix}"
+  web_sg_name    = "${local.project}-web-sg-${local.suffix}"
   log_group_name = "/ecs/${local.api_name}"
+  web_log_group  = "/ecs/${local.web_name}"
 }
 
 resource "aws_s3_bucket" "frontend" {
@@ -114,8 +117,18 @@ resource "aws_ecr_repository" "app" {
   image_tag_mutability = "MUTABLE"
 }
 
+resource "aws_ecr_repository" "web" {
+  name                 = local.web_name
+  image_tag_mutability = "MUTABLE"
+}
+
 resource "aws_cloudwatch_log_group" "ecs" {
   name              = local.log_group_name
+  retention_in_days = 7
+}
+
+resource "aws_cloudwatch_log_group" "web" {
+  name              = local.web_log_group
   retention_in_days = 7
 }
 
@@ -143,6 +156,27 @@ resource "aws_security_group" "ecs_service" {
     description     = "API port"
     from_port       = 5001
     to_port         = 5001
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "web_service" {
+  name        = local.web_sg_name
+  description = "Allow inbound HTTP to ShopSmart web"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description     = "Web port"
+    from_port       = 8080
+    to_port         = 8080
     protocol        = "tcp"
     security_groups = [aws_security_group.alb.id]
   }
@@ -203,6 +237,25 @@ resource "aws_lb_target_group" "api" {
   }
 }
 
+resource "aws_lb_target_group" "web" {
+  name        = "${local.project}-webtg-${local.suffix}"
+  port        = 8080
+  protocol    = "HTTP"
+  vpc_id      = data.aws_vpc.default.id
+  target_type = "ip"
+
+  health_check {
+    path                = "/"
+    port                = "8080"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+  }
+}
+
 resource "aws_lb_listener" "http" {
   load_balancer_arn = aws_lb.app.arn
   port              = 80
@@ -210,7 +263,23 @@ resource "aws_lb_listener" "http" {
 
   default_action {
     type             = "forward"
+    target_group_arn = aws_lb_target_group.web.arn
+  }
+}
+
+resource "aws_lb_listener_rule" "api_paths" {
+  listener_arn = aws_lb_listener.http.arn
+  priority     = 10
+
+  action {
+    type             = "forward"
     target_group_arn = aws_lb_target_group.api.arn
+  }
+
+  condition {
+    path_pattern {
+      values = ["/api/*", "/health", "/api/health"]
+    }
   }
 }
 
@@ -273,6 +342,46 @@ resource "aws_ecs_task_definition" "api" {
   ])
 }
 
+resource "aws_ecs_task_definition" "web" {
+  family                   = local.web_name
+  requires_compatibilities = ["FARGATE"]
+  network_mode             = "awsvpc"
+  cpu                      = "256"
+  memory                   = "512"
+  execution_role_arn       = data.aws_iam_role.labrole.arn
+  task_role_arn            = data.aws_iam_role.labrole.arn
+
+  container_definitions = jsonencode([
+    {
+      name      = "web"
+      image     = "${aws_ecr_repository.web.repository_url}:latest"
+      essential = true
+      portMappings = [
+        {
+          containerPort = 8080
+          hostPort      = 8080
+          protocol      = "tcp"
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          awslogs-group         = aws_cloudwatch_log_group.web.name
+          awslogs-region        = var.aws_region
+          awslogs-stream-prefix = "web"
+        }
+      }
+      healthCheck = {
+        command     = ["CMD-SHELL", "curl -fsS http://localhost:8080/ >/dev/null || exit 1"]
+        interval    = 30
+        timeout     = 5
+        retries     = 3
+        startPeriod = 10
+      }
+    }
+  ])
+}
+
 resource "aws_ecs_service" "api" {
   name            = local.api_name
   cluster         = aws_ecs_cluster.main.id
@@ -295,6 +404,28 @@ resource "aws_ecs_service" "api" {
     container_port   = 5001
   }
 
+  depends_on = [aws_lb_listener.http, aws_lb_listener_rule.api_paths]
+}
+
+resource "aws_ecs_service" "web" {
+  name            = local.web_name
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.web.arn
+  launch_type     = "FARGATE"
+  desired_count   = 0
+
+  network_configuration {
+    subnets          = data.aws_subnets.default.ids
+    security_groups  = [aws_security_group.web_service.id]
+    assign_public_ip = true
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.web.arn
+    container_name   = "web"
+    container_port   = 8080
+  }
+
   depends_on = [aws_lb_listener.http]
 }
 
@@ -306,12 +437,20 @@ output "ecr_repository_url" {
   value = aws_ecr_repository.app.repository_url
 }
 
+output "web_ecr_repository_url" {
+  value = aws_ecr_repository.web.repository_url
+}
+
 output "ecs_cluster_name" {
   value = aws_ecs_cluster.main.name
 }
 
 output "ecs_service_name" {
   value = aws_ecs_service.api.name
+}
+
+output "web_ecs_service_name" {
+  value = aws_ecs_service.web.name
 }
 
 output "alb_dns_name" {

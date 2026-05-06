@@ -76,8 +76,10 @@ jobs:
     needs: [tests]
     outputs:
       ecr_repo: ${{ steps.out.outputs.ecr_repo }}
+      web_ecr_repo: ${{ steps.out.outputs.web_ecr_repo }}
       cluster: ${{ steps.out.outputs.cluster }}
       service: ${{ steps.out.outputs.service }}
+      web_service: ${{ steps.out.outputs.web_service }}
       alb_dns_name: ${{ steps.out.outputs.alb_dns_name }}
       frontend_bucket: ${{ steps.out.outputs.frontend_bucket }}
       frontend_url: ${{ steps.out.outputs.frontend_url }}
@@ -121,8 +123,10 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           echo "ecr_repo=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
+          echo "web_ecr_repo=$(terraform output -raw web_ecr_repository_url)" >> "$GITHUB_OUTPUT"
           echo "cluster=$(terraform output -raw ecs_cluster_name)" >> "$GITHUB_OUTPUT"
           echo "service=$(terraform output -raw ecs_service_name)" >> "$GITHUB_OUTPUT"
+          echo "web_service=$(terraform output -raw web_ecs_service_name)" >> "$GITHUB_OUTPUT"
           echo "alb_dns_name=$(terraform output -raw alb_dns_name)" >> "$GITHUB_OUTPUT"
           echo "frontend_bucket=$(terraform output -raw frontend_bucket_name)" >> "$GITHUB_OUTPUT"
           echo "frontend_url=$(terraform output -raw frontend_website_url)" >> "$GITHUB_OUTPUT"
@@ -133,8 +137,10 @@ jobs:
         run: |
           {
             echo "ECR_REPO=${{ steps.out.outputs.ecr_repo }}"
+            echo "WEB_ECR_REPO=${{ steps.out.outputs.web_ecr_repo }}"
             echo "CLUSTER=${{ steps.out.outputs.cluster }}"
             echo "SERVICE=${{ steps.out.outputs.service }}"
+            echo "WEB_SERVICE=${{ steps.out.outputs.web_service }}"
             echo "ALB_DNS_NAME=${{ steps.out.outputs.alb_dns_name }}"
             echo "FRONTEND_BUCKET=${{ steps.out.outputs.frontend_bucket }}"
             echo "FRONTEND_URL=${{ steps.out.outputs.frontend_url }}"
@@ -179,13 +185,15 @@ jobs:
         run: |
           set -euo pipefail
           source ./tf-outputs/terraform-outputs.env
-          if [ -z "${ECR_REPO:-}" ]; then
-            echo "ECR_REPO is empty; terraform outputs failed."
+          if [ -z "${ECR_REPO:-}" ] || [ -z "${WEB_ECR_REPO:-}" ]; then
+            echo "ECR_REPO or WEB_ECR_REPO is empty; terraform outputs failed."
             exit 1
           fi
           echo "ECR_REPO=$ECR_REPO" >> "$GITHUB_ENV"
+          echo "WEB_ECR_REPO=$WEB_ECR_REPO" >> "$GITHUB_ENV"
           echo "CLUSTER=${CLUSTER:-}" >> "$GITHUB_ENV"
           echo "SERVICE=${SERVICE:-}" >> "$GITHUB_ENV"
+          echo "WEB_SERVICE=${WEB_SERVICE:-}" >> "$GITHUB_ENV"
           if [ -n "${ALB_DNS_NAME:-}" ]; then
             echo "ALB_DNS_NAME=$ALB_DNS_NAME" >> "$GITHUB_ENV"
           fi
@@ -199,6 +207,14 @@ jobs:
           docker build -t "$IMAGE" -f server/Dockerfile server
           docker push "$IMAGE"
           echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Build and push (client)
+        env:
+          TAG: latest
+        run: |
+          IMAGE="$WEB_ECR_REPO:$TAG"
+          docker build -t "$IMAGE" -f client/Dockerfile client
+          docker push "$IMAGE"
 
   deploy_ecs:
     name: Deploy to ECS Fargate
@@ -224,18 +240,25 @@ jobs:
         run: |
           set -euo pipefail
           source ./tf-outputs/terraform-outputs.env
-          if [ -z "${CLUSTER:-}" ] || [ -z "${SERVICE:-}" ]; then
-            echo "CLUSTER or SERVICE is empty; terraform outputs failed."
+          if [ -z "${CLUSTER:-}" ] || [ -z "${SERVICE:-}" ] || [ -z "${WEB_SERVICE:-}" ]; then
+            echo "CLUSTER, SERVICE, or WEB_SERVICE is empty; terraform outputs failed."
             exit 1
           fi
           echo "CLUSTER=$CLUSTER" >> "$GITHUB_ENV"
           echo "SERVICE=$SERVICE" >> "$GITHUB_ENV"
+          echo "WEB_SERVICE=$WEB_SERVICE" >> "$GITHUB_ENV"
 
       - name: Force new deployment
         run: |
           aws ecs update-service \
             --cluster "$CLUSTER" \
             --service "$SERVICE" \
+            --desired-count 1 \
+            --force-new-deployment
+
+          aws ecs update-service \
+            --cluster "$CLUSTER" \
+            --service "$WEB_SERVICE" \
             --desired-count 1 \
             --force-new-deployment
 
