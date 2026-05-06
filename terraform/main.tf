@@ -1,5 +1,12 @@
 locals {
   project = "shopsmart"
+  # Prevent "AlreadyExists" failures when Terraform state is not preserved between runs.
+  # Using a timestamp suffix keeps names unique for each apply execution.
+  suffix         = formatdate("YYYYMMDDhhmmss", timestamp())
+  api_name       = "${local.project}-api-${local.suffix}"
+  cluster_name   = "${local.project}-cluster-${local.suffix}"
+  ecs_sg_name    = "${local.project}-ecs-sg-${local.suffix}"
+  log_group_name = "/ecs/${local.api_name}"
 }
 
 resource "aws_s3_bucket" "tf_bucket" {
@@ -38,17 +45,17 @@ resource "aws_s3_bucket_public_access_block" "tf_bucket" {
 }
 
 resource "aws_ecr_repository" "app" {
-  name                 = "${local.project}-api"
+  name                 = local.api_name
   image_tag_mutability = "MUTABLE"
 }
 
 resource "aws_cloudwatch_log_group" "ecs" {
-  name              = "/ecs/${local.project}-api"
+  name              = local.log_group_name
   retention_in_days = 7
 }
 
 resource "aws_ecs_cluster" "main" {
-  name = "${local.project}-cluster"
+  name = local.cluster_name
 }
 
 data "aws_vpc" "default" {
@@ -63,7 +70,7 @@ data "aws_subnets" "default" {
 }
 
 resource "aws_security_group" "ecs_service" {
-  name        = "${local.project}-ecs-sg"
+  name        = local.ecs_sg_name
   description = "Allow inbound HTTP to ShopSmart API"
   vpc_id      = data.aws_vpc.default.id
 
@@ -100,7 +107,7 @@ variable "image_tag" {
 }
 
 resource "aws_ecs_task_definition" "api" {
-  family                   = "${local.project}-api"
+  family                   = local.api_name
   requires_compatibilities = ["FARGATE"]
   network_mode             = "awsvpc"
   cpu                      = "256"
@@ -143,7 +150,7 @@ resource "aws_ecs_task_definition" "api" {
 }
 
 resource "aws_ecs_service" "api" {
-  name            = "${local.project}-api"
+  name            = local.api_name
   cluster         = aws_ecs_cluster.main.id
   task_definition = aws_ecs_task_definition.api.arn
   launch_type     = "FARGATE"
