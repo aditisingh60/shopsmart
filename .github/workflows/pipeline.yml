@@ -122,6 +122,23 @@ jobs:
           echo "service=$(terraform output -raw ecs_service_name)" >> "$GITHUB_OUTPUT"
         working-directory: terraform
 
+      - name: Persist Terraform outputs to env file
+        if: github.ref == 'refs/heads/main'
+        run: |
+          {
+            echo "ECR_REPO=${{ steps.out.outputs.ecr_repo }}"
+            echo "CLUSTER=${{ steps.out.outputs.cluster }}"
+            echo "SERVICE=${{ steps.out.outputs.service }}"
+          } > terraform-outputs.env
+
+      - name: Upload Terraform outputs artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v6
+        with:
+          name: terraform-outputs
+          path: terraform-outputs.env
+          if-no-files-found: error
+
   build_push:
     name: Phase 3 — Docker Build & Push (ECR)
     runs-on: ubuntu-latest
@@ -143,10 +160,27 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v2
 
+      - name: Download Terraform outputs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-outputs
+          path: ./tf-outputs
+
+      - name: Load ECR repo/cluster/service into environment
+        run: |
+          set -euo pipefail
+          source ./tf-outputs/terraform-outputs.env
+          if [ -z "${ECR_REPO:-}" ]; then
+            echo "ECR_REPO is empty; terraform outputs failed."
+            exit 1
+          fi
+          echo "ECR_REPO=$ECR_REPO" >> "$GITHUB_ENV"
+          echo "CLUSTER=${CLUSTER:-}" >> "$GITHUB_ENV"
+          echo "SERVICE=${SERVICE:-}" >> "$GITHUB_ENV"
+
       - name: Build and push (server)
         id: meta
         env:
-          ECR_REPO: ${{ needs.terraform.outputs.ecr_repo }}
           TAG: latest
         run: |
           IMAGE="$ECR_REPO:$TAG"
@@ -168,10 +202,24 @@ jobs:
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
           aws-region: ${{ secrets.AWS_REGION }}
 
+      - name: Download Terraform outputs artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: terraform-outputs
+          path: ./tf-outputs
+
+      - name: Load cluster/service into environment
+        run: |
+          set -euo pipefail
+          source ./tf-outputs/terraform-outputs.env
+          if [ -z "${CLUSTER:-}" ] || [ -z "${SERVICE:-}" ]; then
+            echo "CLUSTER or SERVICE is empty; terraform outputs failed."
+            exit 1
+          fi
+          echo "CLUSTER=$CLUSTER" >> "$GITHUB_ENV"
+          echo "SERVICE=$SERVICE" >> "$GITHUB_ENV"
+
       - name: Force new deployment
-        env:
-          CLUSTER: ${{ needs.terraform.outputs.cluster }}
-          SERVICE: ${{ needs.terraform.outputs.service }}
         run: |
           aws ecs update-service \
             --cluster "$CLUSTER" \
