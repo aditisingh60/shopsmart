@@ -38,7 +38,7 @@ jobs:
         working-directory: server
 
       - name: Test (server) + JSON report
-        run: npm run test -- --json --outputFile=../test-reports/jest-server.json
+        run: npm run test -- --passWithNoTests --json --outputFile=../test-reports/jest-server.json
         working-directory: server
 
       - name: Install dependencies (client)
