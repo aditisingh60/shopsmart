@@ -75,9 +75,30 @@ resource "aws_security_group" "ecs_service" {
   vpc_id      = data.aws_vpc.default.id
 
   ingress {
-    description = "API port"
-    from_port   = 5001
-    to_port     = 5001
+    description     = "API port"
+    from_port       = 5001
+    to_port         = 5001
+    protocol        = "tcp"
+    security_groups = [aws_security_group.alb.id]
+  }
+
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_security_group" "alb" {
+  name        = "${local.project}-alb-sg-${local.suffix}"
+  description = "Allow inbound HTTP to ALB"
+  vpc_id      = data.aws_vpc.default.id
+
+  ingress {
+    description = "HTTP"
+    from_port   = 80
+    to_port     = 80
     protocol    = "tcp"
     cidr_blocks = ["0.0.0.0/0"]
   }
@@ -87,6 +108,44 @@ resource "aws_security_group" "ecs_service" {
     to_port     = 0
     protocol    = "-1"
     cidr_blocks = ["0.0.0.0/0"]
+  }
+}
+
+resource "aws_lb" "app" {
+  name               = "${local.project}-alb-${local.suffix}"
+  load_balancer_type = "application"
+  internal           = false
+  security_groups    = [aws_security_group.alb.id]
+  subnets            = data.aws_subnets.default.ids
+}
+
+resource "aws_lb_target_group" "api" {
+  name        = "${local.project}-tg-${local.suffix}"
+  port        = 5001
+  protocol    = "HTTP"
+  vpc_id      = data.aws_vpc.default.id
+  target_type = "ip"
+
+  health_check {
+    path                = "/health"
+    port                = "5001"
+    protocol            = "HTTP"
+    matcher             = "200"
+    interval            = 30
+    timeout             = 5
+    healthy_threshold   = 2
+    unhealthy_threshold = 3
+  }
+}
+
+resource "aws_lb_listener" "http" {
+  load_balancer_arn = aws_lb.app.arn
+  port              = 80
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.api.arn
   }
 }
 
@@ -159,7 +218,13 @@ resource "aws_ecs_service" "api" {
   network_configuration {
     subnets          = data.aws_subnets.default.ids
     security_groups  = [aws_security_group.ecs_service.id]
-    assign_public_ip = true
+    assign_public_ip = false
+  }
+
+  load_balancer {
+    target_group_arn = aws_lb_target_group.api.arn
+    container_name   = "api"
+    container_port   = 5001
   }
 }
 
@@ -177,4 +242,12 @@ output "ecs_cluster_name" {
 
 output "ecs_service_name" {
   value = aws_ecs_service.api.name
+}
+
+output "alb_dns_name" {
+  value = aws_lb.app.dns_name
+}
+
+output "deployment_url" {
+  value = "http://${aws_lb.app.dns_name}/"
 }

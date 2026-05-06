@@ -78,6 +78,7 @@ jobs:
       ecr_repo: ${{ steps.out.outputs.ecr_repo }}
       cluster: ${{ steps.out.outputs.cluster }}
       service: ${{ steps.out.outputs.service }}
+      alb_dns_name: ${{ steps.out.outputs.alb_dns_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -120,6 +121,7 @@ jobs:
           echo "ecr_repo=$(terraform output -raw ecr_repository_url)" >> "$GITHUB_OUTPUT"
           echo "cluster=$(terraform output -raw ecs_cluster_name)" >> "$GITHUB_OUTPUT"
           echo "service=$(terraform output -raw ecs_service_name)" >> "$GITHUB_OUTPUT"
+          echo "alb_dns_name=$(terraform output -raw alb_dns_name)" >> "$GITHUB_OUTPUT"
         working-directory: terraform
 
       - name: Persist Terraform outputs to env file
@@ -129,6 +131,7 @@ jobs:
             echo "ECR_REPO=${{ steps.out.outputs.ecr_repo }}"
             echo "CLUSTER=${{ steps.out.outputs.cluster }}"
             echo "SERVICE=${{ steps.out.outputs.service }}"
+            echo "ALB_DNS_NAME=${{ steps.out.outputs.alb_dns_name }}"
           } > terraform-outputs.env
 
       - name: Upload Terraform outputs artifact
@@ -177,6 +180,9 @@ jobs:
           echo "ECR_REPO=$ECR_REPO" >> "$GITHUB_ENV"
           echo "CLUSTER=${CLUSTER:-}" >> "$GITHUB_ENV"
           echo "SERVICE=${SERVICE:-}" >> "$GITHUB_ENV"
+          if [ -n "${ALB_DNS_NAME:-}" ]; then
+            echo "ALB_DNS_NAME=$ALB_DNS_NAME" >> "$GITHUB_ENV"
+          fi
 
       - name: Build and push (server)
         id: meta
